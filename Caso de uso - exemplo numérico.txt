@@ -1,0 +1,107 @@
+=============================================================================
+CASO DE ESTUDO: MONITORAMENTO DE SOJA EM SORRISO-MT (CENÁRIO NUBLADO)
+=============================================================================
+
+DATA DA ANÁLISE: 15 de Fevereiro (Plena safra, período chuvoso).
+SITUAÇÃO: Céu 100% encoberto por nuvens. Ocorrência de "Veranico" (seca
+momentânea) e estresse térmico, invisíveis aos olhos mas detectáveis pelos 
+sensores.
+
+-----------------------------------------------------------------------------
+PASSO 1: DEFINIÇÃO DO BASELINE (O "NORMAL")
+-----------------------------------------------------------------------------
+O sistema consulta o histórico (2018-2024) para a 1ª quinzena de Fevereiro.
+Foram removidos anos onde a produtividade desviou >15% da mediana.
+
+MÉDIAS HISTÓRICAS E DESVIOS (StdDev) PARA O PERÍODO:
+1. Precipitação (CHIRPS): 
+   - Média: 15 mm/dia | StdDev: 5 mm
+2. LST (Temperatura - MODIS): 
+   - Média: 27°C      | StdDev: 2°C
+3. Radar VH (Estrutura - Sentinel-1): 
+   - Média: -11 dB    | StdDev: 1.5 dB (Após filtro Speckle 50m)
+4. NDVI (Vigor - Sentinel-2): 
+   - Média: 0.85      | StdDev: 0.05
+
+-----------------------------------------------------------------------------
+PASSO 2: COLETA DE DADOS ATUAIS (O "REAL")
+-----------------------------------------------------------------------------
+O satélite passa sobre o talhão e coleta os seguintes dados brutos:
+
+1. Precipitação: 2 mm/dia (Seca severa para a época).
+2. LST: 32°C (Muito acima do normal, estresse térmico).
+3. Radar VH: -14 dB (Sinal baixo, indicando perda de biomassa/folhas).
+4. NDVI: 0.15 (Leitura errada devido à nuvem espessa).
+5. Confiança Óptica (QA60): 0.1 (10% de visibilidade).
+
+-----------------------------------------------------------------------------
+PASSO 3: CÁLCULO DOS Z-SCORES (O DESVIO)
+-----------------------------------------------------------------------------
+Fórmula: Z = (Valor Atual - Média Histórica) / Desvio Padrão
+
+1. Z_Precipitação = (2 - 15) / 5     = -2.60 (Desvio negativo forte)
+2. Z_LST          = (32 - 27) / 2    = +2.50 (Desvio positivo forte)
+3. Z_Radar_VH     = (-14 - (-11))/1.5= -2.00 (Desvio negativo forte)
+4. Z_NDVI         = (0.15 - 0.85)/0.05 = -14.0 (Erro grosseiro da nuvem)
+
+-----------------------------------------------------------------------------
+PASSO 4: ATIVAÇÃO DA IA E FALLBACK
+-----------------------------------------------------------------------------
+O modelo Random Forest define os pesos iniciais baseados na importância
+histórica para a produtividade local:
+- Peso Precip: 0.35
+- Peso LST:    0.25
+- Peso VH:     0.20
+- Peso NDVI:   0.20
+
+VERIFICAÇÃO DE CONFIANÇA:
+Como Confiança Óptica (0.1) < 0.3:
+>> ATIVANDO MODO FALLBACK <<
+1. Peso NDVI é forçado a 0.0.
+2. O sistema ignora o Z-Score absurdo do NDVI (-14.0).
+3. A análise foca nos sensores de Radar, Temperatura e Chuva.
+
+Pesos Válidos Totais = 0.35 (Precip) + 0.25 (LST) + 0.20 (VH) = 0.80
+
+-----------------------------------------------------------------------------
+PASSO 5: CÁLCULO PONDERADO E APLICAÇÃO DE SINAIS
+-----------------------------------------------------------------------------
+Ajuste de sinal para que "Ruim" seja sempre positivo (aumenta o risco):
+- Precip (Ruim é baixo): Sinal (-1)
+- VH (Ruim é baixo):     Sinal (-1)
+- LST (Ruim é alto):     Sinal (+1)
+
+Contribuições (Z * Sinal * Peso):
+1. Precip: -2.60 * (-1) * 0.35 = +0.91
+2. LST:    +2.50 * (+1) * 0.25 = +0.625
+3. VH:     -2.00 * (-1) * 0.20 = +0.40
+
+Soma das Contribuições = 1.935
+Soma dos Pesos Válidos = 0.80
+
+Z_Médio_Final = 1.935 / 0.80 = +2.41 (Média Ponderada)
+
+-----------------------------------------------------------------------------
+PASSO 6: CÁLCULO FINAL DO IEHA E DIAGNÓSTICO
+-----------------------------------------------------------------------------
+Fórmula: IEHA = 5 + (Z_Médio_Final * 2.5)
+
+IEHA = 5 + (2.41 * 2.5)
+IEHA = 5 + 6.025
+IEHA = 11.025
+
+Limitação (Clamp): O índice varia de 0 a 10.
+IEHA FINAL = 10.0
+
+-----------------------------------------------------------------------------
+RESULTADO PARA O USUÁRIO
+-----------------------------------------------------------------------------
+VALOR: 10.0
+NÍVEL: ALERTA (Risco Elevado > 7.5)
+CAUSA PRINCIPAL: Precipitação (Maior contribuição absoluta: 0.91)
+STATUS: "ALERTA (Causa: precip_mm_day) (Radar/Fallback)"
+
+INTERPRETAÇÃO:
+Mesmo sem ver a lavoura (nuvens), o sistema detectou risco máximo devido
+à combinação de falta de chuva, alta temperatura e queda de estrutura
+biométrica (Radar). O crédito agrícola seria sinalizado como alto risco.
